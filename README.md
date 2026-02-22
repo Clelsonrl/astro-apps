@@ -1,2 +1,2 @@
-# astro-agendamento
-Wrapper for google apps script web app
+# astro-apps
+Wrapper for google apps scripts web apps
