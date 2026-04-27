@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Glossary Manager - External</title>
+    <link
+      href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900|Material+Icons|Material+Icons+Outlined"
+      rel="stylesheet"
+      type="text/css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/@mdi/font@^6.0.0/css/materialdesignicons.min.css"
+      rel="stylesheet"
+      type="text/css"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/quasar@2/dist/quasar.prod.css"
+      rel="stylesheet"
+      type="text/css"
+    />
+    <style>
+      .scroll {
+        --scrollbar-color-thumb: #333;
+        --scrollbar-color-track: black;
+        --scrollbar-width: thin;
+        --scrollbar-width-legacy: 0.5rem;
+      }
+      @supports (scrollbar-width: auto) {
+        .scroll {
+          scrollbar-color: var(--scrollbar-color-thumb) var(--scrollbar-color-track);
+          scrollbar-width: var(--scrollbar-width);
+        }
+      }
+      .my-sticky-header-table thead tr th {
+        position: sticky;
+        z-index: 2;
+        background: black;
+      }
+      .my-sticky-header-table thead tr:first-child th {
+        top: 0;
+      }
+      .scroll-snap {
+        scroll-snap-type: y proximity;
+        scroll-padding-top: 33px;
+      }
+      .q-table td {
+        scroll-snap-align: start;
+      }
+      .bg-dark-page {
+        background-color: #121212;
+      }
+      .bg-astro {
+        background-color: #ffd400;
+      }
+      .text-astro {
+        color: #ffd400;
+      }
+      #mic {
+        transition: box-shadow 150ms ease-in-out;
+        border-radius: 4px;
+      }
+      #mic:focus, #mic:active {
+        outline: none;
+        box-shadow: 0 0 0px 1px rgb(255 212 0 / 20%), 0 0 20px -2px rgb(255 212 0 / 50%);
+      }
+      .time-indicator {
+        position: absolute;
+        z-index: 11;
+        top: 50%;
+        translate: 0 -50%;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" style="min-height: 100vh">
+      <q-layout view="hhh Lpp fFf" container style="height: 100vh">
+        <q-page-container class="bg-dark-page">
+          <q-page flat dark class="row">
+            <q-table
+              ref="tableRef"
+              :loading="loading"
+              dark
+              sticky-header
+              class="col-6 my-sticky-header-table"
+              style="height: 100vh"
+              color="astro"
+              dense
+              square
+              :columns="columns"
+              :rows="rows"
+              no-data-label="Não há palavras para o glossário"
+              row-key="expression"
+              selection="single"
+              v-model:selected="selectedRow"
+              :rows-per-page-options="[0]"
+              binary-state-sort
+              table-class="text-body1 scroll-snap scroll"
+              virtual-scroll
+              :virtual-scroll-item-size="48"
+            >
+              <template #body="props">
+                <q-tr :props="props" @click="selectedRow = [props.row]">
+                  <q-td>
+                    <q-icon v-if="props.selected" color="secondary" name="mdi-circle"></q-icon>
+                  </q-td>
+                  <q-td key="row" :props="props">{{ props.rowIndex + 1 }}</q-td>
+                  <q-td key="expression" :props="props">{{ props.row.expression }}</q-td>
+                  <q-td key="status" :props="props" :class="[ props.row.id ? 'text-green-13' : 'text-warning']">
+                    {{ props.row.id ? 'gravado' : 'pendente' }}
+                  </q-td>
+                  <q-td key="actions" :props="props">
+                    <q-btn dense flat :icon="props.selected && isPlaying ? 'mdi-pause' : 'mdi-play'" @click.stop="handleRowPlay(props)" :disable="!props.row.id"></q-btn>
+                    <q-btn dense flat icon="mdi-microphone" @click.stop="handleRowRecord(props)"></q-btn>
+                  </q-td>
+                </q-tr>
+              </template>
+              <template #bottom>
+                <div class="row justify-end full-width">
+                  <q-chip outline dark color="warning" dense square label="pendente: ">&nbsp;{{ status.pending }}</q-chip>
+                  <q-chip outline dark color="green-13" dense square label="gravado: ">&nbsp;{{ status.recorded }}</q-chip>
+                  <q-chip dark color="purple" dense square label="total: ">&nbsp;{{ status.total }}</q-chip>
+                </div>
+              </template>
+            </q-table>
+
+            <div class="col full-width q-pa-md">
+              <q-select dense dark color="astro" v-model="mic" class="col q-mb-md" :options="micOptions" label="Microfone" option-label="text" option-value="deviceId"></q-select>
+              <q-checkbox v-model="autoplay" dark keep-color color="orange" class="text-white" label="Tocar automaticamente"></q-checkbox>
+              
+              <div class="row justify-between q-mt-xl q-mb-sm">
+                <q-btn :disable="!readyToRecord" glossy dark dense :icon="recordButtonIcon" :text-color="isRecording ? 'grey-2' : 'red'" :color="isRecording ? 'negative' : ''" @click="startStopRecording"></q-btn>
+                <q-chip size="16px" square dark :color="selectedRow.length ? (readyToRecord ? 'negative' : 'positive') : 'grey-8'" class="text-white q-ma-none">
+                  {{ selectedRow[0]?.expression ?? `nenhuma expressão selecionada` }}
+                </q-chip>
+                <q-btn :disabled="!recordedURL || isRecording" glossy class="q-px-md" dark dense round :icon="playbackButtonIcon" :color="isPlaying ? 'positive' : ''" :text-color="isPlaying ? 'grey-2' : 'positive'" @click="playPause"></q-btn>
+              </div>
+
+              <div tabindex="0" ref="micRef" id="mic" class="col-4 bg-dark text-white relative-position q-mb-lg" style="height: 128px;" @keydown.space="playPause" @keydown.r="startStopRecording" @click="micRef?.focus()">
+                <q-chip square outline icon="mdi-alert" v-if="!activeRegion && readyToRecord && recordingDuration !== '00:00.0' && !isRecording" class="no-events bg-dark text-center absolute-top q-mx-auto" color="grey-4" style="z-index: 11; pointer-events: none; opacity: 0.9;">
+                  selecione uma região para poder salvar
+                </q-chip>
+                <span class="bg-black q-px-xs text-caption time-indicator" style="right: 0">{{ recordingDuration }}</span>
+                <span class="bg-black q-px-xs text-caption time-indicator">{{ currentTime }}</span>
+                <q-inner-loading dark class="bg-dark" style="z-index: 10" :showing="loading">
+                  <q-spinner-bars size="50px" color="astro"></q-spinner-bars>
+                </q-inner-loading>
+              </div>
+
+              <div v-if="readyToRecord" class="row justify-center q-mt-xl">
+                <q-btn dark :disable="!recordedURL || !readyToRecord || !activeRegion || noSignal" color="astro" text-color="black" size="md" @click="handleSave">SALVAR</q-btn>
+              </div>
+            </div>
+          </q-page>
+        </q-page-container>
+      </q-layout>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quasar@2/dist/quasar.umd.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quasar@2/dist/lang/pt-BR.umd.prod.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7.8.8/dist/wavesurfer.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7.8.8/dist/plugins/regions.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7.8.8/dist/plugins/record.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.all.js"></script>
+
+    <script>
+      const { ref, computed, onMounted, watch, useTemplateRef } = Vue;
+
+      // --- GENERIC GAS BRIDGE ---
+      const gasRun = (functionName, ...args) => {
+        return new Promise((resolve, reject) => {
+          if (!window.opener) {
+            reject('No window.opener found. Is the proxy sidebar open?');
+            return;
+          }
+          const messageId = Math.random().toString(36).substring(2, 11);
+          const listener = (event) => {
+            if (event.data && event.data.messageId === messageId) {
+              window.removeEventListener('message', listener);
+              if (event.data.success) resolve(event.data.result);
+              else reject(event.data.error);
+            }
+          };
+          window.addEventListener('message', listener);
+          window.opener.postMessage({ functionName, args, messageId }, '*');
+        });
+      };
+
+      const app = Vue.createApp({
+        setup() {
+          const loading = ref(false);
+          const rows = ref([]);
+          const selectedRow = ref([]);
+          const mic = ref(null);
+          const micOptions = ref([]);
+          const autoplay = ref(true);
+          const readyToRecord = ref(false);
+          const isRecording = ref(false);
+          const isPlaying = ref(false);
+          const recordedURL = ref('');
+          const recordingDuration = ref('00:00.0');
+          const currentTime = ref('00:00.0');
+          const noSignal = ref(false);
+          const activeRegion = ref(null);
+          const micRef = useTemplateRef('micRef');
+
+          const columns = [
+            { name: 'row', label: '#', align: 'left' },
+            { name: 'expression', label: 'Expressão', align: 'left', field: 'expression' },
+            { name: 'status', label: 'Status', align: 'center' },
+            { name: 'actions', label: 'Ações', align: 'center' }
+          ];
+
+          const status = computed(() => ({
+            recorded: rows.value.filter(r => r.id).length,
+            pending: rows.value.filter(r => !r.id).length,
+            total: rows.value.length
+          }));
+
+          const recordButtonIcon = computed(() => isRecording.value ? 'mdi-stop' : 'mdi-record');
+          const playbackButtonIcon = computed(() => isPlaying.value ? 'mdi-pause' : 'mdi-play-outline');
+
+          const ws = ref(null);
+          const recordPlugin = ref(null);
+          const regionsPlugin = WaveSurfer.Regions.create();
+
+          const createWaveSurfer = () => {
+            if (ws.value) ws.value.destroy();
+            ws.value = WaveSurfer.create({
+              container: micRef.value,
+              waveColor: '#ffd400',
+              progressColor: '#ffd40073',
+              barWidth: 2,
+              hideScrollbar: true,
+              plugins: [regionsPlugin]
+            });
+
+            ws.value.on('timeupdate', (time) => updateProgress(time * 1000, currentTime));
+            ws.value.on('pause', () => isPlaying.value = false);
+            ws.value.on('play', () => isPlaying.value = true);
+            ws.value.on('ready', (duration) => {
+              if (!isRecording.value && autoplay.value && duration > 0.001) ws.value.play();
+              updateProgress(duration * 1000, recordingDuration);
+            });
+
+            recordPlugin.value = ws.value.registerPlugin(WaveSurfer.Record.create({
+              continuousWaveform: true,
+              mimeType: 'audio/webm;codecs=opus'
+            }));
+
+            recordPlugin.value.on('record-end', (blob) => {
+              isRecording.value = false;
+              recordedURL.value = URL.createObjectURL(blob);
+              ws.value.load(recordedURL.value);
+              noSignal.value = !ws.value.exportPeaks()[0].some(p => p > 0.001);
+              if (noSignal.value) {
+                Quasar.Notify.create({ message: 'Sinal de áudio não detectado!', color: 'negative', position: 'bottom-right' });
+              }
+            });
+
+            recordPlugin.value.on('record-progress', (time) => updateProgress(time, recordingDuration));
+
+            regionsPlugin.enableDragSelection({ color: 'rgba(255, 212, 0, 0.1)' });
+            regionsPlugin.on('region-created', (region) => {
+              activeRegion.value?.remove();
+              activeRegion.value = region;
+              if (autoplay.value) region.play();
+            });
+          };
+
+          const updateProgress = (time, target) => {
+            const minutes = Math.floor(time / 60000);
+            const seconds = Math.floor((time % 60000) / 1000);
+            const deciseconds = Math.floor((time % 1000) / 100);
+            target.value = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${deciseconds}`;
+          };
+
+          const loadData = async () => {
+            loading.value = true;
+            try {
+              const data = await gasRun('_getGlossaryData');
+              // data format from .gs: { list: [[]], recordedMap: [[]], driveFilesList: [[]] }
+              const mapped = data.list.map(row => {
+                const expression = row[0];
+                const recorded = data.recordedMap.find(r => r[0] === expression);
+                return { expression, id: recorded ? recorded[1] : null };
+              });
+              rows.value = mapped;
+            } catch (e) {
+              console.error(e);
+              Quasar.Notify.create({ message: 'Erro ao carregar dados: ' + e, color: 'negative' });
+            } finally {
+              loading.value = false;
+            }
+          };
+
+          onMounted(async () => {
+            Quasar.lang.set(Quasar.lang.ptBR);
+            await loadData();
+            createWaveSurfer();
+
+            const devices = await WaveSurfer.Record.getAvailableAudioDevices();
+            micOptions.value = devices.map(d => ({ deviceId: d.deviceId, text: d.label || d.deviceId }));
+            mic.value = micOptions.value.find(o => o.text.toLowerCase().includes('default')) || micOptions.value[0];
+          });
+
+          const handleRowPlay = async (props) => {
+            readyToRecord.value = false;
+            if (props.row.id) {
+              loading.value = true;
+              try {
+                const dataUrl = await gasRun('_getAudioBlob', props.row.id);
+                recordedURL.value = dataUrl;
+                ws.value.load(dataUrl);
+              } catch (e) {
+                Quasar.Notify.create({ message: 'Erro ao baixar áudio: ' + e, color: 'negative' });
+              } finally {
+                loading.value = false;
+              }
+            }
+          };
+
+          const handleRowRecord = (props) => {
+            readyToRecord.value = true;
+            activeRegion.value?.remove();
+            activeRegion.value = null;
+            recordedURL.value = '';
+            ws.value.empty();
+            updateProgress(0, recordingDuration);
+          };
+
+          const startStopRecording = () => {
+            if (recordPlugin.value.isRecording()) {
+              recordPlugin.value.stopRecording();
+            } else {
+              activeRegion.value?.remove();
+              activeRegion.value = null;
+              isRecording.value = true;
+              recordPlugin.value.startRecording({ deviceId: mic.value?.deviceId });
+            }
+          };
+
+          const playPause = () => {
+            if (activeRegion.value) ws.value.setTime(activeRegion.value.start);
+            ws.value.playPause();
+          };
+
+          const handleSave = async () => {
+            if (!activeRegion.value) return;
+            loading.value = true;
+            try {
+              const blob = await getTrimmedAudioBlob();
+              const reader = new FileReader();
+              reader.readAsDataURL(blob);
+              reader.onloadend = async () => {
+                const base64data = reader.result;
+                const glossaryData = { expression: selectedRow.value[0].expression, id: selectedRow.value[0].id };
+                const res = await gasRun('_saveToDrive', base64data, glossaryData, rows.value);
+                
+                // Update local status
+                const row = rows.value.find(r => r.expression === glossaryData.expression);
+                if (row) row.id = res.fileId;
+                
+                Quasar.Notify.create({ message: 'Salvo com sucesso!', color: 'positive' });
+                readyToRecord.value = false;
+              };
+            } catch (e) {
+              Quasar.Notify.create({ message: 'Erro ao salvar: ' + e, color: 'negative' });
+            } finally {
+              loading.value = false;
+            }
+          };
+
+          async function getTrimmedAudioBlob() {
+            const start = activeRegion.value.start;
+            const end = activeRegion.value.end;
+            const buffer = ws.value.getDecodedData();
+            const sampleRate = buffer.sampleRate;
+            const startSample = Math.floor(start * sampleRate);
+            const endSample = Math.floor(end * sampleRate);
+            const channels = buffer.numberOfChannels;
+            
+            const offlineCtx = new OfflineAudioContext(channels, endSample - startSample, sampleRate);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(offlineCtx.destination);
+            source.start(0, start, end - start);
+            
+            const renderedBuffer = await offlineCtx.startRendering();
+            return audioBufferToMp3(renderedBuffer);
+          }
+
+          function audioBufferToMp3(audioBuffer) {
+            const mp3encoder = new lamejs.Mp3Encoder(audioBuffer.numberOfChannels, audioBuffer.sampleRate, 128);
+            const mp3Data = [];
+            const sampleSize = 1152;
+            const channels = [];
+            for (let i = 0; i < audioBuffer.numberOfChannels; i++) channels.push(audioBuffer.getChannelData(i));
+
+            for (let i = 0; i < audioBuffer.length; i += sampleSize) {
+              const samples = new Int16Array(sampleSize * audioBuffer.numberOfChannels);
+              for (let j = 0; j < sampleSize && i + j < audioBuffer.length; j++) {
+                for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+                  let s = Math.max(-1, Math.min(1, channels[c][i + j]));
+                  samples[j * audioBuffer.numberOfChannels + c] = s < 0 ? s * 0x8000 : s * 0x7fff;
+                }
+              }
+              const mp3buf = mp3encoder.encodeBuffer(samples);
+              if (mp3buf.length > 0) mp3Data.push(mp3buf);
+            }
+            const mp3buf = mp3encoder.flush();
+            if (mp3buf.length > 0) mp3Data.push(mp3buf);
+            return new Blob(mp3Data, { type: 'audio/mp3' });
+          }
+
+          return {
+            loading, rows, selectedRow, mic, micOptions, autoplay, readyToRecord, isRecording, isPlaying,
+            recordedURL, recordingDuration, currentTime, noSignal, columns, status, recordButtonIcon,
+            playbackButtonIcon, micRef, handleRowPlay, handleRowRecord, startStopRecording, playPause, handleSave, activeRegion
+          };
+        }
+      });
+
+      app.use(Quasar);
+      app.mount('#app');
+    </script>
+  </body>
+</html>
