@@ -171,6 +171,15 @@
           </template>
         </q-banner>
       </q-inner-loading>
+
+      <!-- Chrome Only Warning -->
+      <q-dialog v-model="showBrowserWarning" no-esc-dismiss persistent>
+        <q-banner inline-actions class="text-white bg-red text-center">
+          <span class="text-h6">
+            Este app funciona apenas em navegadores baseados no chrome (Chrome, Brave, Edge)
+          </span>
+        </q-banner>
+      </q-dialog>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
@@ -387,6 +396,9 @@
             ws.value.playPause();
           };
 
+          const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+          const showBrowserWarning = ref(!isChrome);
+
           const handleSave = async () => {
             if (!activeRegion.value || !selectedRow.value.length) return;
             loading.value = true;
@@ -400,7 +412,11 @@
                   expression: selectedRow.value[0].expression, 
                   id: selectedRow.value[0].id 
                 };
-                const res = await gasRun('_saveToDrive', base64data, glossaryData, rows.value);
+                
+                // CRITICAL FIX: Convert Vue Proxy/Ref rows to a plain array to avoid DataCloneError
+                const plainRows = JSON.parse(JSON.stringify(rows.value));
+                
+                const res = await gasRun('_saveToDrive', base64data, glossaryData, plainRows);
                 
                 // Update local row with new ID
                 const row = rows.value.find(r => r.expression === glossaryData.expression);
@@ -464,7 +480,8 @@
             connected, checkConnection, loading, rows, selectedRow, mic, micOptions, autoplay, 
             readyToRecord, isRecording, isPlaying, recordedURL, recordingDuration, currentTime, 
             noSignal, columns, status, recordButtonIcon, playbackButtonIcon, micRef, 
-            handleRowPlay, handleRowRecord, startStopRecording, playPause, handleSave, activeRegion
+            handleRowPlay, handleRowRecord, startStopRecording, playPause, handleSave, activeRegion,
+            showBrowserWarning
           };
         }
       });
