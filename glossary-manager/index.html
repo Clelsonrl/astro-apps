@@ -23,31 +23,62 @@
     <div id="app" style="min-height: 100vh">
       <q-layout view="hhh Lpp fFf" container style="height: 100vh">
         <q-page-container class="bg-dark-page">
-          <q-page flat dark class="row">
+          <q-page flat dark class="column">
             <q-table
               ref="tableRef"
               :loading="loading"
               dark
-              sticky-header
               class="col-6 my-sticky-header-table"
-              style="height: 100vh"
+              style="height: 50vh"
               color="astro"
               dense
               square
               :visible-columns="['expression', 'status', 'actions']"
               :columns="columns"
               :rows="rows"
-              no-data-label="Não há palavras para o glossário"
+              no-data-label="não há expressões de glossário"
               row-key="expression"
               selection="single"
+              :filter="filterInput"
+              :filter-method="filterStatus"
               v-model:selected="selectedRow"
               :rows-per-page-options="[0]"
-              :pagination="pagination"
-              table-class="text-body1 scroll-snap scroll"
+              table-class="text-body1 scroll"
               virtual-scroll
               :virtual-scroll-item-size="48"
-              :virtual-scroll-sticky-size-start="48"
+              :virtual-scroll-sticky-size-start="33"
             >
+              <template #header="props">
+                <q-tr :props="props">
+                  <q-th style="width: 40px"></q-th>
+                  <q-th
+                    v-for="col in props.cols"
+                    :key="col.name"
+                    :props="props"
+                  >
+                    {{ col.label }}
+                    <q-btn
+                      v-if="col.label === 'Expressão'"
+                      dense
+                      round
+                      size="xs"
+                      color="black"
+                      text-color="astro"
+                      dark
+                      icon="mdi-reload"
+                      @click="resetAndReload"
+                    >
+                      <q-tooltip
+                        anchor="top middle"
+                        self="bottom middle"
+                        class="text-body2 bg-black"
+                      >
+                        recarregar dados
+                      </q-tooltip>
+                    </q-btn>
+                  </q-th>
+                </q-tr>
+              </template>
               <template v-slot:body-selection="scope"> </template>
               <template #body="props">
                 <q-tr key="selection" :props="props">
@@ -63,7 +94,25 @@
                     {{ props.rowIndex + 1 }}
                   </q-td>
                   <q-td key="expression" :props="props">
-                    {{ props.row.expression }}
+                    <q-chip
+                      :disable="loadingActiveCell && clickedExpression === props.row.expression"
+                      title="localizar célula na planilha"
+                      clickable
+                      square
+                      color="dark"
+                      dense
+                      dark
+                      @click="goToGlossaryCell(props.row.expression)"
+                      :label="props.row.expression"
+                    >
+                      <q-inner-loading
+                        dark
+                        color="astro"
+                        class="bg-dark"
+                        :showing="loadingActiveCell && clickedExpression === props.row.expression"
+                      >
+                      </q-inner-loading>
+                    </q-chip>
                   </q-td>
                   <q-td
                     key="status"
@@ -71,36 +120,63 @@
                     :class="[ props.row.id ? 'text-green-13' : 'text-warning']"
                   >
                     {{ props.row.id ? 'gravado' : 'pendente' }}
+                    <q-icon
+                      dark
+                      v-if="props.row.deletable"
+                      size="xs"
+                      color="grey-3"
+                      name="mdi-information-outline"
+                    >
+                      <q-tooltip
+                        max-width="250px"
+                        anchor="top middle"
+                        self="bottom middle"
+                        class="text-body2 bg-black"
+                      >
+                        esta expressão foi gravada, porém não consta mais na
+                        Lista de Glossário da planilha
+                      </q-tooltip>
+                    </q-icon>
                   </q-td>
                   <q-td key="actions" :props="props">
                     <q-btn
-                      class="relative-position"
-                      :disable="!props.row.id"
-                      title="ouvir"
+                      v-if="props.row.deletable"
+                      title="remover do drive"
                       dense
-                      :text-color="props.selected && !readyToRecord ? 'positive' : 'grey-5'"
-                      :icon="props.selected && isPlaying ? 'mdi-pause' : 'mdi-play'"
-                      @click="handleRowPlay(props, $event)"
-                    >
-                      <q-icon
-                        class="absolute"
-                        style="
-                          top: 50%;
-                          left: -10px;
-                          transform: translate(0, -50%);
-                        "
-                        color="light-blue-5"
-                        size="16px"
-                        name="mdi-ear-hearing"
-                      ></q-icon>
-                    </q-btn>
-                    <q-btn
-                      :title="props.row.id ? 'regravar' : 'gravar'"
-                      dense
-                      :text-color=" props.selected && readyToRecord ? 'red' : 'grey-5'"
-                      icon="mdi-microphone"
-                      @click="handleRowRecord(props, $event)"
+                      text-color="red"
+                      icon="mdi-delete"
+                      @click="removeFromDrive(props.row.id, props.rowIndex)"
                     ></q-btn>
+                    <div v-else>
+                      <q-btn
+                        :disable="!props.row.id"
+                        title="ouvir"
+                        dense
+                        :text-color="props.selected && !readyToRecord ? 'positive' : 'grey-5'"
+                        :icon="props.selected && isPlaying ? 'mdi-pause' : 'mdi-play'"
+                        @click="handleRowPlay(props, $event)"
+                      >
+                        <q-icon
+                          v-if="blobCacheMap[props.row.id]"
+                          class="absolute no-pointer-events"
+                          style="
+                            top: 50%;
+                            left: -15px;
+                            transform: translate(0, -50%);
+                          "
+                          color="deep-purple-3"
+                          size="16px"
+                          name="mdi-ear-hearing"
+                        ></q-icon>
+                      </q-btn>
+                      <q-btn
+                        :title="props.row.id ? 'regravar' : 'gravar'"
+                        dense
+                        :text-color=" props.selected && readyToRecord ? 'red' : 'grey-5'"
+                        icon="mdi-microphone"
+                        @click="handleRowRecord(props, $event)"
+                      ></q-btn>
+                    </div>
                   </q-td>
                 </q-tr>
               </template>
@@ -110,9 +186,12 @@
                     outline
                     dark
                     color="warning"
+                    v-bind="{...(filterInput === 'pending' && {icon: 'mdi-filter'})}"
+                    :clickable="status.pending > 0"
                     dense
                     square
                     label="pendente: "
+                    @click="filterInput = 'pending'"
                   >
                     &nbsp;{{ status.pending }}
                   </q-chip>
@@ -120,58 +199,93 @@
                     outline
                     dark
                     color="green-13"
+                    v-bind="{...(filterInput === 'recorded' && {icon: 'mdi-filter'})}"
+                    :clickable="status.recorded > 0"
                     dense
                     square
                     label="gravado: "
+                    @click="filterInput = 'recorded'"
                   >
                     &nbsp;{{ status.recorded }}
                   </q-chip>
-                  <q-chip dark color="purple" dense square label="total: "
+                  <q-chip
+                    dark
+                    color="purple"
+                    v-bind="{...(!filterInput && {icon: 'mdi-filter'})}"
+                    :clickable="status.total > 0"
+                    dense
+                    square
+                    label="total: "
+                    @click="filterInput = ''"
                     >&nbsp;{{ status.total }}</q-chip
                   >
                 </div>
               </template>
             </q-table>
             <!-- WAVESURFER -->
-            <div class="col full-width q-pa-md">
+            <div class="col full-width q-pa-md q-gutter-y-sm">
               <q-select
+                hide-bottom-space
                 dense
                 dark
                 color="astro"
                 v-model="mic"
-                class="col q-mb-md"
+                class="col"
                 :options="micOptions"
                 label="Microfone"
                 option-label="text"
                 option-value="deviceId"
               ></q-select>
               <q-checkbox
+                dense
                 v-model="autoplay"
                 dark
-                keep-color
                 color="orange"
-                class="text-white"
-                label="Tocar automaticamente"
-              ></q-checkbox>
-              <div class="row justify-between q-mt-xl q-mb-sm">
-                <q-btn
-                  :disable="!readyToRecord"
-                  glossy
-                  dark
-                  dense
-                  :icon="recordButtonIcon"
-                  :text-color="isRecording ? 'grey-2' : 'red'"
-                  :color="isRecording ? 'negative' : ''"
-                  @click="startStopRecording"
-                >
-                  <q-tooltip
-                    anchor="top middle"
-                    self="bottom middle"
-                    class="text-body2 bg-black"
+                keep-color
+                class="text-white q-my-md"
+                label="tocar automaticamente ao gravar e editar"
+              >
+              </q-checkbox>
+              <div class="row justify-between">
+                <div class="q-gutter-x-xs">
+                  <q-btn
+                    :disable="!readyToRecord"
+                    glossy
+                    dark
+                    dense
+                    :icon="recordButtonIcon"
+                    :text-color="isRecording ? 'grey-2' : 'red'"
+                    :color="isRecording ? 'negative' : ''"
+                    @click="startStopRecording"
                   >
-                    record/stop
-                  </q-tooltip>
-                </q-btn>
+                    <q-tooltip
+                      anchor="top middle"
+                      self="bottom middle"
+                      class="text-body2 bg-black"
+                    >
+                      record/stop
+                    </q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    v-if="readyToRecord"
+                    dense
+                    dark
+                    :disable="!recordedURL || !readyToRecord || !activeRegion || noSignal"
+                    color="astro"
+                    text-color="black"
+                    size="md"
+                    @click="saveToDrive"
+                    icon="mdi-content-save"
+                  >
+                    <q-tooltip
+                      anchor="top middle"
+                      self="bottom middle"
+                      class="text-body2 bg-black"
+                    >
+                      salvar [Ctrl+S]
+                    </q-tooltip>
+                  </q-btn>
+                </div>
                 <q-chip
                   size="16px"
                   v-bind="{ icon: selectedRow.length ? (readyToRecord ? 'mdi-microphone' : 'mdi-play') : 'mdi-cancel' }"
@@ -207,9 +321,9 @@
                 tabindex="0"
                 ref="micRef"
                 id="mic"
-                class="col-4 bg-dark text-white relative-position q-mb-lg"
+                class="col-4 bg-dark text-white relative-position q-mb-md"
                 @keydown.space="playPause"
-                @keydown="$event.key === 'r' ? startStopRecording() : null"
+                @keydown="handleWSKeydown"
                 @click="micRef?.focus()"
                 @focus="showTips = true"
                 @blur="showTips = false"
@@ -219,7 +333,7 @@
                   outline
                   icon="mdi-alert"
                   v-if="!activeRegion && readyToRecord && recordingDuration !== '00:00.0' && !isRecording"
-                  class="no-events bg-dark text-center absolute-top q-mx-auto"
+                  class="no-pointer-events bg-dark text-center absolute-top q-mx-auto"
                   color="grey-4"
                   style="
                     width: fit-content;
@@ -239,11 +353,13 @@
                   {{ currentTime }}</span
                 >
                 <div
-                  v-if="showTips"
+                  v-if="showTips && rows.length"
                   class="text-grey-5 absolute-bottom"
                   style="bottom: -28px"
                 >
-                  pressione R para gravar/parar, espaço para pausar ou dar play
+                  pressione {{readyToRecord ? ' R para gravar/parar, ' : ''}} {{
+                  activeRegion ? 'Ctrl+S para salvar, ' : ''}} espaço para
+                  pausar ou dar play
                 </div>
                 <q-inner-loading
                   dark
@@ -253,17 +369,6 @@
                 >
                   <q-spinner-bars size="50px" color="astro"></q-spinner-bars>
                 </q-inner-loading>
-              </div>
-              <div v-if="readyToRecord" class="row justify-center q-mt-xl">
-                <q-btn
-                  dark
-                  :disable="!recordedURL || !readyToRecord || !activeRegion || noSignal"
-                  color="astro"
-                  text-color="black"
-                  size="md"
-                  @click="handleSave"
-                  >SALVAR</q-btn
-                >
               </div>
             </div>
           </q-page>
@@ -286,6 +391,7 @@
     <script src="https://unpkg.com/wavesurfer.js@7.8.8/dist/plugins/regions.min.js"></script>
     <script src="https://unpkg.com/wavesurfer.js@7.8.8/dist/plugins/record.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.all.js"></script>
+
     <script>
       // --- GENERIC GAS BRIDGE ---
       const gasRun = (functionName, ...args) => {
@@ -311,6 +417,7 @@
         setup() {
           const { ref, onMounted, useTemplateRef, watch, Ref, computed, nextTick } = Vue;
           Quasar.lang.set(Quasar.lang.ptBR);
+
           const loading = ref(false);
 
           const tableRef = useTemplateRef('tableRef');
@@ -329,13 +436,17 @@
               label: 'Expressão',
               align: 'left',
               style: 'min-width: 90px;',
+              sortable: true,
+              sort: (a, b) => a.localeCompare(b),
             },
             {
               name: 'status',
-              field: 'status',
+              field: 'id',
               label: 'Status',
               align: 'center',
               style: 'min-width: 60px; max-width: 60px;',
+              sortable: true,
+              sort: (a, b) => a - b,
             },
             {
               name: 'actions',
@@ -353,8 +464,16 @@
           ]);
 
           const rows = ref([]);
+          const filterInput = ref('');
           const selectedRow = ref([]);
-          const selectedRowIndex = ref(-1);
+          const blobCacheMap = ref({});
+
+          function filterStatus(rows, terms, cols, getCellValue) {
+            return rows.filter((row) => {
+              if (!terms.length) return row;
+              return terms === 'pending' ? !row.id : row.id;
+            });
+          }
 
           const status = computed(() => {
             const recorded = rows.value.filter((row) => row.id).length;
@@ -368,12 +487,16 @@
             };
           });
 
+          const clickedExpression = ref('');
+          const loadingActiveCell = ref(false);
+
           onMounted(async () => {
             await getGlossaryData();
             await nextTick();
             createWaveSurfer();
-            
-            // Notification moved to setup context or specific trigger to match original logic but in async flow
+            const wsWrapper = ws.value.getWrapper();
+            wsWrapper.style.pointerEvents = 'none';
+
             Quasar.Notify.create({
               message: 'glossário pronto',
               color: 'astro',
@@ -383,41 +506,54 @@
             });
           });
 
-          function handleRowSelection(selection) {
-            console.log('🚀 ~ handleRowSelection ~ selection:', selection);
-            const id = selection[0]?.id;
+          function handleRowPlay(props, event) {
+            resetWS();
 
-            if (id) {
-              // TODO: get file blob from id
-            }
-          }
-
-          async function handleRowPlay(props, event) {
-            selectedRowIndex.value = props.rowIndex;
+            const id = props.row.id;
+            updateProgress(0, currentTime);
             toggleRowSelection(props, event);
             readyToRecord.value = false;
-            
-            if (props.row.id) {
-              loading.value = true;
-              try {
-                const dataUrl = await gasRun('_getAudioBlob', props.row.id);
-                recordedURL.value = dataUrl;
-                await ws.value.load(dataUrl);
-              } catch (e) {
-                Quasar.Notify.create({ message: 'Erro ao baixar áudio: ' + e, color: 'negative' });
-              } finally {
-                loading.value = false;
-              }
+
+            const blob = blobCacheMap.value[id];
+
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              ws.value.loadBlob(blob);
+              recordedURL.value = url;
+              if (!autoplay.value) playPause();
+              return;
             }
+
+            loadAudioById(id);
           }
 
           const readyToRecord = ref(false);
 
           function handleRowRecord(props, event) {
-            selectedRowIndex.value = props.rowIndex;
+            resetWS();
+
             toggleRowSelection(props, event);
-            updateProgress(0, recordingDuration);
             readyToRecord.value = true;
+          }
+
+          function handleWSKeydown(e) {
+            switch (e.key) {
+              case 'r':
+                startStopRecording();
+                break;
+              case 's':
+                e.preventDefault();
+                if (e.ctrlKey && readyToRecord.value && activeRegion.value) {
+                  saveToDrive();
+                }
+                break;
+              default:
+                break;
+            }
+          }
+
+          function resetWS() {
+            updateProgress(0, recordingDuration);
             activeRegion.value?.remove();
             activeRegion.value = null;
             ws.value.empty();
@@ -450,18 +586,21 @@
 
           const autoplay = ref(true);
 
+          const isSaving = ref(false);
+
           const activeRegion = ref(null);
 
           const createWaveSurfer = () => {
-            if (!micRef.value) return;
             ws.value = WaveSurfer.create({
-              container: micRef.value,
+              container: micRef.value ?? '',
               waveColor: '#ffd400',
               progressColor: '#ffd40073',
               barWidth: 2,
+              normalize: true,
               hideScrollbar: true,
-              sampleRate: 48000,
-              plugins: [regionsPlugin]
+              sampleRate: 44100,
+              plugins: [regionsPlugin],
+              url: recordedURL.value,
             });
 
             ws.value.on('pause', () => {
@@ -475,11 +614,12 @@
             ws.value.on('timeupdate', (time) =>
               updateProgress(time * 1000, currentTime)
             );
-
             ws.value.on('ready', (duration) => {
-              if (!isRecording.value && autoplay.value && duration > 0.001) {
+              !isRecording.value &&
+                autoplay.value &&
+                duration > 0.001 &&
+                !isSaving.value &&
                 ws.value.play().catch(() => {});
-              }
               updateProgress(duration * 1000, recordingDuration);
             });
             ws.value?.on('interaction', () => {
@@ -496,18 +636,14 @@
             );
 
             // Render recorded audio
-            recordPlugin.value.on('record-end', async (blob) => {
+            recordPlugin.value.on('record-end', (blob) => {
               micRef.value?.focus();
               isRecording.value = false;
               recordingEnded.value = true;
               const recordedUrl = URL.createObjectURL(blob);
 
               recordedURL.value = recordedUrl;
-              try {
-                await ws.value?.load(recordedUrl);
-              } catch (e) {
-                console.error('WaveSurfer load error:', e);
-              }
+              ws.value?.setTime(0);
 
               noSignal.value = !ws.value
                 .exportPeaks()[0]
@@ -518,7 +654,6 @@
                     'Confira seu microfone! Sinal muito baixo ou inexistente.',
                   color: 'negative',
                   icon: 'mdi-alert',
-                  position: 'bottom-right',
                 });
               }
             });
@@ -551,11 +686,21 @@
             });
 
             regionsPlugin.on('region-created', (region) => {
+              if (noSignal.value) {
+                setTimeout(() => region.remove());
+                Quasar.Notify.create({
+                  message:
+                    'Confira seu microfone! Sinal muito baixo ou inexistente.',
+                  color: 'negative',
+                  icon: 'mdi-alert',
+                });
+                return;
+              }
               activeRegion.value?.remove();
               activeRegion.value = region;
               micRef.value?.focus();
               region.setContent('região a ser salva');
-              autoplay.value && region.play();
+              autoplay.value && region.play().catch(() => {});
             });
 
             regionsPlugin.on('region-out', (region) => {
@@ -566,7 +711,7 @@
 
             regionsPlugin.on('region-updated', (region) => {
               micRef.value?.focus();
-              autoplay.value && region.play();
+              autoplay.value && region.play().catch(() => {});
             });
           }
 
@@ -626,19 +771,14 @@
             if (activeRegion.value) {
               ws.value?.setTime(activeRegion.value.start);
             }
-            ws.value?.playPause();
+            ws.value?.playPause().catch(() => {});
           }
 
           function useTrimmedAudioBlob() {
             async function getTrimmedAudioBlob() {
               const start = activeRegion.value?.start ?? 0;
               const tail = 0.25;
-              const end =
-                (activeRegion.value?.end
-                  ? activeRegion.value.end + tail
-                  : null) ??
-                ws.value?.getDecodedData()?.duration ??
-                0;
+              const end = activeRegion.value.end + tail;
 
               // Get the audio buffer from wavesurfer
               const buffer = ws.value.getDecodedData();
@@ -758,18 +898,97 @@
             return { getTrimmedAudioBlob };
           }
 
+          function getExcludedExpressionsRecorded(list, driveFilesList) {
+            const excludedExpressions = [];
+            list = list.flat();
+
+            for (const file of driveFilesList) {
+              if (!list.includes(file[0]))
+                excludedExpressions.push({
+                  expression: file[0],
+                  id: file[1],
+                  deletable: true,
+                });
+            }
+
+            return excludedExpressions;
+          }
+
+          function resetAndReload() {
+            resetWS();
+            rows.value = [];
+            selectedRow.value = [];
+            getGlossaryData();
+          }
+
           const showTips = ref(false);
 
           /* gas fundtions */
+          async function removeFromDrive(id, rowIndex) {
+            Quasar.Loading.show({
+              message: 'removendo arquivo...',
+            });
+
+            try {
+              const { isSessionUserTheOwner } = await gasRun('_removeFileFromDrive', id);
+              if (!isSessionUserTheOwner)
+                Quasar.Notify.create({
+                  message:
+                    'gravação removida com sucesso, mas por pertencer a outro usuário, foi apenas removida da pasta do glossário e continua no drive do proprietário.',
+                  color: 'warning',
+                  textColor: 'black',
+                  icon: 'mdi-alert',
+                  timeout: 0,
+                  actions: [{ icon: 'close', color: 'black' }],
+                });
+
+              rows.value.splice(rowIndex, 1);
+            } catch (e) {
+              Quasar.Notify.create({ message: 'Erro ao remover: ' + e, color: 'negative' });
+            } finally {
+              Quasar.Loading.hide();
+            }
+          }
+
+          async function goToGlossaryCell(expression) {
+            clickedExpression.value = expression;
+            loadingActiveCell.value = true;
+            try {
+              await gasRun('_activateGlossaryCell', expression);
+            } catch (e) {
+              Quasar.Notify.create({ message: 'Erro ao localizar célula: ' + e, color: 'negative' });
+            } finally {
+              loadingActiveCell.value = false;
+              clickedExpression.value = '';
+            }
+          }
+
           async function getGlossaryData() {
             loading.value = true;
             try {
-              const data = await gasRun('_getGlossaryData');
-              const mappedGlossaryWords = data.list.map((row) => {
-                const expression = row[0];
-                const recorded = data.recordedMap.find((r) => r[0] === expression);
-                return { expression, id: recorded ? recorded[1] : null };
-              });
+              const { list, recordedMap, driveFilesList } = await gasRun('_getGlossaryData');
+              if (!list) {
+                rows.value = [];
+                loading.value = false;
+                return;
+              }
+              const mappedGlossaryWords = list.map((g) => ({
+                expression: g[0],
+                id: recordedMap.find((r) => r[0] === g[0])?.[1],
+              }));
+
+              const excludedExpressions = getExcludedExpressionsRecorded(
+                list,
+                driveFilesList
+              );
+
+              mappedGlossaryWords.push(...excludedExpressions);
+
+              mappedGlossaryWords.sort(
+                (a, b) => a.expression.localeCompare(b.expression),
+                'pt-BR',
+                { sensitivity: 'base' }
+              );
               rows.value = mappedGlossaryWords;
             } catch (e) {
               Quasar.Notify.create({ message: 'Erro ao carregar dados: ' + e, color: 'negative' });
@@ -778,57 +997,143 @@
             }
           }
 
-          const handleSave = async () => {
-            if (!activeRegion.value || !selectedRow.value.length) return;
+          function dataURLToBlob(dataURL) {
+            // Split the data URL into two parts
+            const [header, base64Data] = dataURL.split(',');
+
+            // Decode base64 string
+            const byteCharacters = atob(base64Data);
+
+            // Create an array for the binary data
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+
+            // Convert array to Uint8Array, then create a Blob
+            const byteArray = new Uint8Array(byteNumbers);
+            const mimeType = header.match(/:(.*?);/)[1]; // Extract MIME type from data URL
+            return new Blob([byteArray], { type: mimeType });
+          }
+
+          function blobToDataURL(blob) {
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+
+              reader.onloadend = () => resolve(reader.result); // Get the data URL when done
+              reader.onerror = reject; // Handle errors
+
+              reader.readAsDataURL(blob); // Start reading the blob as a data URL
+            });
+          }
+
+          async function loadAudioById(id) {
             loading.value = true;
             try {
-              const blob = await getTrimmedAudioBlob();
-              const reader = new FileReader();
-              reader.readAsDataURL(blob);
-              reader.onloadend = async () => {
-                const base64data = reader.result;
-                const glossaryData = { 
-                  expression: selectedRow.value[0].expression, 
-                  id: selectedRow.value[0].id 
-                };
-                
-                // CRITICAL FIX: Convert Vue Proxy/Ref rows to a plain array to avoid DataCloneError
-                const plainRows = JSON.parse(JSON.stringify(rows.value));
-                
-                const res = await gasRun('_saveToDrive', base64data, glossaryData, plainRows);
-                
-                // Update local row with new ID
-                const row = rows.value.find(r => r.expression === glossaryData.expression);
-                if (row) row.id = res.fileId;
-                
-                Quasar.Notify.create({ message: 'Salvo com sucesso!', color: 'positive' });
-                readyToRecord.value = false;
-              };
+              const data = await gasRun('_getAudioBlob', id);
+              const blob = dataURLToBlob(data);
+              const url = URL.createObjectURL(blob);
+              ws.value.loadBlob(blob);
+              recordedURL.value = url;
+
+              blobCacheMap.value[id] = blob;
+
+              if (!autoplay.value) playPause();
             } catch (e) {
-              Quasar.Notify.create({ message: 'Erro ao salvar: ' + e, color: 'negative' });
+              Quasar.Notify.create({ message: 'Erro ao baixar áudio: ' + e, color: 'negative' });
             } finally {
               loading.value = false;
             }
-          };
+          }
+
+          async function saveToDrive() {
+            loading.value = true;
+            readyToRecord.value = false;
+            isSaving.value = true;
+
+            Quasar.Loading.show({
+              spinner: undefined,
+            });
+
+            const id = selectedRow.value[0].id;
+
+            if (id) delete blobCacheMap.value[id];
+
+            try {
+              const blob = await getTrimmedAudioBlob();
+              const dataURL = await blobToDataURL(blob);
+              const expressionObj = selectedRow.value[0];
+
+              // CRITICAL FIX: Convert Vue Proxy/Ref rows to a plain array to avoid DataCloneError
+              const plainRows = JSON.parse(JSON.stringify(rows.value));
+
+              const { fileId, isSessionUserTheOwner } = await gasRun('_saveToDrive', dataURL, expressionObj, plainRows);
+              
+              const index = rows.value.findIndex(
+                (o) => o.expression === expressionObj.expression
+              );
+              rows.value.splice(index, 1, {
+                expression: expressionObj.expression,
+                id: fileId,
+              });
+
+              blobCacheMap.value[fileId] = blob;
+
+              autoplay.value && ws.value.play().catch(() => {});
+
+              if (!isSessionUserTheOwner)
+                Quasar.Notify.create({
+                  message: 'glossário salvo com sucesso!👍',
+                  color: 'positive',
+                  icon: 'mdi-check',
+                });
+              else
+                Quasar.Notify.create({
+                  message:
+                    'glossário salvo com sucesso, mas a gravação anterior, por pertencer a outro usuário, foi apenas removida da pasta do glossário e continua no drive do proprietário.',
+                  color: 'warning',
+                  textColor: 'black',
+                  icon: 'mdi-alert',
+                  timeout: 0,
+                  actions: [{ icon: 'close', color: 'black' }],
+                });
+            } catch (error) {
+              Quasar.Notify.create({
+                classes: 'text-white text-bold',
+                type: 'negative',
+                timeout: 0,
+                message: `Oops, deu ruim: ${error}`,
+                actions: [{ icon: 'close', color: 'white', round: true }],
+              });
+            } finally {
+              loading.value = false;
+              isSaving.value = false;
+              Quasar.Loading.hide();
+            }
+          }
 
           const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
           const showBrowserWarning = ref(!isChrome);
 
           return {
+            showBrowserWarning,
             tableRef,
-            pagination: {
-              rowsPerPage: 0,
-            },
             loading,
             columns,
             rows,
             selectedRow,
+            filterInput,
+            filterStatus,
+            blobCacheMap,
             status,
             autoplay,
-            handleRowSelection,
             handleRowPlay,
             handleRowRecord,
             readyToRecord,
+            handleWSKeydown,
+            loadingActiveCell,
+            clickedExpression,
+            removeFromDrive,
             /* WAVESURFER */
             noSignal,
             mic,
@@ -845,9 +1150,10 @@
             showTips,
             recordingDuration,
             currentTime,
-            getTrimmedAudioBlob,
-            handleSave,
-            showBrowserWarning
+            saveToDrive,
+            goToGlossaryCell,
+            getGlossaryData,
+            resetAndReload,
           };
         },
       });
@@ -877,7 +1183,9 @@
         z-index: 2;
         /* bg color is important; just specify one */
         background: black;
+        scroll-padding-top: 33px;
       }
+
       .my-sticky-header-table thead tr:first-child th {
         top: 0;
       }
@@ -885,15 +1193,6 @@
       .q-table--loading thead tr:last-child th {
         /* height of all previous header rows */
         top: 33px;
-      }
-
-      .scroll-snap {
-        scroll-snap-type: y proximity;
-        scroll-padding-top: 33px;
-      }
-
-      .q-table td {
-        scroll-snap-align: start;
       }
 
       .bg-dark-page {
@@ -907,16 +1206,12 @@
       .text-astro {
         color: #ffd400;
       }
-      .q-chip:focus {
-        transition: outline 0.2s linear;
-        outline: 2px solid white; /* Customize the outline style */
-      }
 
       #mic {
         transition: box-shadow 150ms ease-in-out;
         border-radius: 4px;
-        min-height: 128px;
       }
+
       #mic:focus,
       #mic:active {
         outline: none;
