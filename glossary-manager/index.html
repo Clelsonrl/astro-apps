@@ -322,7 +322,7 @@
                 ref="micRef"
                 id="mic"
                 class="col-4 bg-dark text-white relative-position q-mb-md"
-                @keydown.space="playPause"
+                @keydown.space.prevent="playPause"
                 @keydown="handleWSKeydown"
                 @click="micRef?.focus()"
                 @focus="showTips = true"
@@ -374,7 +374,7 @@
           </q-page>
         </q-page-container>
       </q-layout>
-      <q-dialog v-model="showBrowserWarning" no-esc-dismiss persistent>
+      <q-dialog v-model="notChrome" no-esc-dismiss persistent>
         <q-banner inline-actions class="text-white bg-red text-center">
           <span class="text-h6">
             Este app funciona apenas em navegadores baseados no chrome (Chrome,
@@ -418,6 +418,7 @@
           const { ref, onMounted, useTemplateRef, watch, Ref, computed, nextTick } = Vue;
           Quasar.lang.set(Quasar.lang.ptBR);
 
+          const notChrome = ref(true);
           const loading = ref(false);
 
           const tableRef = useTemplateRef('tableRef');
@@ -491,6 +492,7 @@
           const loadingActiveCell = ref(false);
 
           onMounted(async () => {
+            notChrome.value = !navigator.userAgent.includes('Chrome');
             await getGlossaryData();
             await nextTick();
             createWaveSurfer();
@@ -615,11 +617,9 @@
               updateProgress(time * 1000, currentTime)
             );
             ws.value.on('ready', (duration) => {
-              !isRecording.value &&
-                autoplay.value &&
-                duration > 0.001 &&
-                !isSaving.value &&
+              if (!isRecording.value && autoplay.value && duration > 0.001 && !isSaving.value) {
                 ws.value.play().catch(() => {});
+              }
               updateProgress(duration * 1000, recordingDuration);
             });
             ws.value?.on('interaction', () => {
@@ -700,7 +700,7 @@
               activeRegion.value = region;
               micRef.value?.focus();
               region.setContent('região a ser salva');
-              autoplay.value && region.play().catch(() => {});
+              autoplay.value && region.play();
             });
 
             regionsPlugin.on('region-out', (region) => {
@@ -711,7 +711,7 @@
 
             regionsPlugin.on('region-updated', (region) => {
               micRef.value?.focus();
-              autoplay.value && region.play().catch(() => {});
+              autoplay.value && region.play();
             });
           }
 
@@ -1098,6 +1098,7 @@
                   actions: [{ icon: 'close', color: 'black' }],
                 });
             } catch (error) {
+              Quasar.Loading.hide();
               Quasar.Notify.create({
                 classes: 'text-white text-bold',
                 type: 'negative',
@@ -1108,15 +1109,11 @@
             } finally {
               loading.value = false;
               isSaving.value = false;
-              Quasar.Loading.hide();
             }
           }
 
-          const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
-          const showBrowserWarning = ref(!isChrome);
-
           return {
-            showBrowserWarning,
+            notChrome,
             tableRef,
             loading,
             columns,
@@ -1211,7 +1208,7 @@
         transition: box-shadow 150ms ease-in-out;
         border-radius: 4px;
       }
-
+      
       #mic:focus,
       #mic:active {
         outline: none;
