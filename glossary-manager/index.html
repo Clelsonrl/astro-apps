@@ -59,6 +59,8 @@
       #mic {
         transition: box-shadow 150ms ease-in-out;
         border-radius: 4px;
+        min-height: 128px;
+        background: #1d1d1d;
       }
       #mic:focus, #mic:active {
         outline: none;
@@ -78,6 +80,7 @@
       <q-layout view="hhh Lpp fFf" container style="height: 100vh">
         <q-page-container class="bg-dark-page">
           <q-page flat dark class="row">
+            <!-- Table Section -->
             <q-table
               ref="tableRef"
               :loading="loading"
@@ -125,6 +128,7 @@
               </template>
             </q-table>
 
+            <!-- WaveSurfer Section -->
             <div class="col full-width q-pa-md">
               <q-select dense dark color="astro" v-model="mic" class="col q-mb-md" :options="micOptions" label="Microfone" option-label="text" option-value="deviceId"></q-select>
               <q-checkbox v-model="autoplay" dark keep-color color="orange" class="text-white" label="Tocar automaticamente"></q-checkbox>
@@ -137,7 +141,7 @@
                 <q-btn :disabled="!recordedURL || isRecording" glossy class="q-px-md" dark dense round :icon="playbackButtonIcon" :color="isPlaying ? 'positive' : ''" :text-color="isPlaying ? 'grey-2' : 'positive'" @click="playPause"></q-btn>
               </div>
 
-              <div tabindex="0" ref="micRef" id="mic" class="col-4 bg-dark text-white relative-position q-mb-lg" style="height: 128px;" @keydown.space="playPause" @keydown.r="startStopRecording" @click="micRef?.focus()">
+              <div tabindex="0" ref="micRef" id="mic" class="col-4 text-white relative-position q-mb-lg" @keydown.space.prevent="playPause" @keydown.r="startStopRecording" @click="micRef?.focus()">
                 <q-chip square outline icon="mdi-alert" v-if="!activeRegion && readyToRecord && recordingDuration !== '00:00.0' && !isRecording" class="no-events bg-dark text-center absolute-top q-mx-auto" color="grey-4" style="z-index: 11; pointer-events: none; opacity: 0.9;">
                   selecione uma região para poder salvar
                 </q-chip>
@@ -155,6 +159,18 @@
           </q-page>
         </q-page-container>
       </q-layout>
+
+      <!-- Connection Error Overlay -->
+      <q-inner-loading :showing="!connected" style="z-index: 9999">
+        <q-banner class="bg-negative text-white">
+          <template v-slot:avatar><q-icon name="mdi-link-off" color="white" /></template>
+          Não foi possível conectar ao Google Sheets.
+          <div class="text-caption">Certifique-se de que a barra lateral do Glossary Manager está aberta no Google Sheets e que você abriu esta janela através do botão nela.</div>
+          <template v-slot:action>
+            <q-btn flat color="white" label="Tentar novamente" @click="checkConnection" />
+          </template>
+        </q-banner>
+      </q-inner-loading>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
@@ -166,30 +182,11 @@
     <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.all.js"></script>
 
     <script>
-      const { ref, computed, onMounted, watch, useTemplateRef } = Vue;
-
-      // --- GENERIC GAS BRIDGE ---
-      const gasRun = (functionName, ...args) => {
-        return new Promise((resolve, reject) => {
-          if (!window.opener) {
-            reject('No window.opener found. Is the proxy sidebar open?');
-            return;
-          }
-          const messageId = Math.random().toString(36).substring(2, 11);
-          const listener = (event) => {
-            if (event.data && event.data.messageId === messageId) {
-              window.removeEventListener('message', listener);
-              if (event.data.success) resolve(event.data.result);
-              else reject(event.data.error);
-            }
-          };
-          window.addEventListener('message', listener);
-          window.opener.postMessage({ functionName, args, messageId }, '*');
-        });
-      };
+      const { ref, computed, onMounted, watch, useTemplateRef, nextTick } = Vue;
 
       const app = Vue.createApp({
         setup() {
+          const connected = ref(true);
           const loading = ref(false);
           const rows = ref([]);
           const selectedRow = ref([]);
@@ -222,12 +219,40 @@
           const recordButtonIcon = computed(() => isRecording.value ? 'mdi-stop' : 'mdi-record');
           const playbackButtonIcon = computed(() => isPlaying.value ? 'mdi-pause' : 'mdi-play-outline');
 
+          // WaveSurfer setup
           const ws = ref(null);
           const recordPlugin = ref(null);
           const regionsPlugin = WaveSurfer.Regions.create();
 
+          const checkConnection = () => {
+            connected.value = !!window.opener;
+            if (connected.value) loadData();
+          };
+
+          const gasRun = (functionName, ...args) => {
+            return new Promise((resolve, reject) => {
+              if (!window.opener) {
+                connected.value = false;
+                reject('Lost connection to Google Sheets proxy.');
+                return;
+              }
+              const messageId = Math.random().toString(36).substring(2, 11);
+              const listener = (event) => {
+                if (event.data && event.data.messageId === messageId) {
+                  window.removeEventListener('message', listener);
+                  if (event.data.success) resolve(event.data.result);
+                  else reject(event.data.error);
+                }
+              };
+              window.addEventListener('message', listener);
+              window.opener.postMessage({ functionName, args, messageId }, '*');
+            });
+          };
+
           const createWaveSurfer = () => {
             if (ws.value) ws.value.destroy();
+            if (!micRef.value) return;
+
             ws.value = WaveSurfer.create({
               container: micRef.value,
               waveColor: '#ffd400',
@@ -250,13 +275,21 @@
               mimeType: 'audio/webm;codecs=opus'
             }));
 
-            recordPlugin.value.on('record-end', (blob) => {
+            recordPlugin.value.on('record-end', async (blob) => {
               isRecording.value = false;
-              recordedURL.value = URL.createObjectURL(blob);
-              ws.value.load(recordedURL.value);
-              noSignal.value = !ws.value.exportPeaks()[0].some(p => p > 0.001);
-              if (noSignal.value) {
-                Quasar.Notify.create({ message: 'Sinal de áudio não detectado!', color: 'negative', position: 'bottom-right' });
+              if (!blob || blob.size === 0) return;
+              
+              const url = URL.createObjectURL(blob);
+              recordedURL.value = url;
+              
+              try {
+                await ws.value.load(url);
+                noSignal.value = !ws.value.exportPeaks()[0].some(p => p > 0.001);
+                if (noSignal.value) {
+                  Quasar.Notify.create({ message: 'Sinal de áudio não detectado!', color: 'negative', position: 'bottom-right' });
+                }
+              } catch (e) {
+                console.error('Error loading recorded audio:', e);
               }
             });
 
@@ -278,10 +311,10 @@
           };
 
           const loadData = async () => {
+            if (loading.value) return;
             loading.value = true;
             try {
               const data = await gasRun('_getGlossaryData');
-              // data format from .gs: { list: [[]], recordedMap: [[]], driveFilesList: [[]] }
               const mapped = data.list.map(row => {
                 const expression = row[0];
                 const recorded = data.recordedMap.find(r => r[0] === expression);
@@ -289,8 +322,11 @@
               });
               rows.value = mapped;
             } catch (e) {
-              console.error(e);
-              Quasar.Notify.create({ message: 'Erro ao carregar dados: ' + e, color: 'negative' });
+              console.error('loadData error:', e);
+              // Avoid infinite notifications by only showing if connected
+              if (connected.value) {
+                Quasar.Notify.create({ message: 'Erro ao carregar dados: ' + e, color: 'negative' });
+              }
             } finally {
               loading.value = false;
             }
@@ -298,7 +334,8 @@
 
           onMounted(async () => {
             Quasar.lang.set(Quasar.lang.ptBR);
-            await loadData();
+            checkConnection();
+            await nextTick();
             createWaveSurfer();
 
             const devices = await WaveSurfer.Record.getAvailableAudioDevices();
@@ -313,7 +350,7 @@
               try {
                 const dataUrl = await gasRun('_getAudioBlob', props.row.id);
                 recordedURL.value = dataUrl;
-                ws.value.load(dataUrl);
+                await ws.value.load(dataUrl);
               } catch (e) {
                 Quasar.Notify.create({ message: 'Erro ao baixar áudio: ' + e, color: 'negative' });
               } finally {
@@ -329,9 +366,11 @@
             recordedURL.value = '';
             ws.value.empty();
             updateProgress(0, recordingDuration);
+            micRef.value?.focus();
           };
 
           const startStopRecording = () => {
+            if (!readyToRecord.value) return;
             if (recordPlugin.value.isRecording()) {
               recordPlugin.value.stopRecording();
             } else {
@@ -343,12 +382,13 @@
           };
 
           const playPause = () => {
+            if (!ws.value) return;
             if (activeRegion.value) ws.value.setTime(activeRegion.value.start);
             ws.value.playPause();
           };
 
           const handleSave = async () => {
-            if (!activeRegion.value) return;
+            if (!activeRegion.value || !selectedRow.value.length) return;
             loading.value = true;
             try {
               const blob = await getTrimmedAudioBlob();
@@ -356,10 +396,13 @@
               reader.readAsDataURL(blob);
               reader.onloadend = async () => {
                 const base64data = reader.result;
-                const glossaryData = { expression: selectedRow.value[0].expression, id: selectedRow.value[0].id };
+                const glossaryData = { 
+                  expression: selectedRow.value[0].expression, 
+                  id: selectedRow.value[0].id 
+                };
                 const res = await gasRun('_saveToDrive', base64data, glossaryData, rows.value);
                 
-                // Update local status
+                // Update local row with new ID
                 const row = rows.value.find(r => r.expression === glossaryData.expression);
                 if (row) row.id = res.fileId;
                 
@@ -377,6 +420,8 @@
             const start = activeRegion.value.start;
             const end = activeRegion.value.end;
             const buffer = ws.value.getDecodedData();
+            if (!buffer) throw new Error('No audio data available.');
+            
             const sampleRate = buffer.sampleRate;
             const startSample = Math.floor(start * sampleRate);
             const endSample = Math.floor(end * sampleRate);
@@ -416,9 +461,10 @@
           }
 
           return {
-            loading, rows, selectedRow, mic, micOptions, autoplay, readyToRecord, isRecording, isPlaying,
-            recordedURL, recordingDuration, currentTime, noSignal, columns, status, recordButtonIcon,
-            playbackButtonIcon, micRef, handleRowPlay, handleRowRecord, startStopRecording, playPause, handleSave, activeRegion
+            connected, checkConnection, loading, rows, selectedRow, mic, micOptions, autoplay, 
+            readyToRecord, isRecording, isPlaying, recordedURL, recordingDuration, currentTime, 
+            noSignal, columns, status, recordButtonIcon, playbackButtonIcon, micRef, 
+            handleRowPlay, handleRowRecord, startStopRecording, playPause, handleSave, activeRegion
           };
         }
       });
