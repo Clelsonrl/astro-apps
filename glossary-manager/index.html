@@ -477,10 +477,9 @@
             );
 
             ws.value.on('ready', (duration) => {
-              !isRecording.value &&
-                autoplay.value &&
-                duration > 0.001 &&
-                ws.value.play();
+              if (!isRecording.value && autoplay.value && duration > 0.001) {
+                ws.value.play().catch(() => {});
+              }
               updateProgress(duration * 1000, recordingDuration);
             });
             ws.value?.on('interaction', () => {
@@ -913,12 +912,12 @@
         transition: box-shadow 150ms ease-in-out;
         border-radius: 4px;
         min-height: 128px;
-        &:focus,
-        &:active {
-          outline: none;
-          box-shadow: 0 0 0px 1px rgb(255 212 0 / 20%),
-            0 0 20px -2px rgb(255 212 0 / 50%);
-        }
+      }
+      #mic:focus,
+      #mic:active {
+        outline: none;
+        box-shadow: 0 0 0px 1px rgb(255 212 0 / 20%),
+          0 0 20px -2px rgb(255 212 0 / 50%);
       }
 
       .time-indicator {
