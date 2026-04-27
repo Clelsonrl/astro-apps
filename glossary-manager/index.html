@@ -496,14 +496,18 @@
             );
 
             // Render recorded audio
-            recordPlugin.value.on('record-end', (blob) => {
+            recordPlugin.value.on('record-end', async (blob) => {
               micRef.value?.focus();
               isRecording.value = false;
               recordingEnded.value = true;
               const recordedUrl = URL.createObjectURL(blob);
 
               recordedURL.value = recordedUrl;
-              ws.value?.load(recordedUrl);
+              try {
+                await ws.value?.load(recordedUrl);
+              } catch (e) {
+                console.error('WaveSurfer load error:', e);
+              }
 
               noSignal.value = !ws.value
                 .exportPeaks()[0]
