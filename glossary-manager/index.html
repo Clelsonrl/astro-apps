@@ -1129,7 +1129,6 @@
                   actions: [{ icon: "close", color: "black" }],
                 })
             } catch (error) {
-              Quasar.Loading.hide()
               Quasar.Notify.create({
                 classes: "text-white text-bold",
                 type: "negative",
@@ -1138,6 +1137,7 @@
                 actions: [{ icon: "close", color: "white", round: true }],
               })
             } finally {
+              Quasar.Loading.hide()
               loading.value = false
               isSaving.value = false
             }
