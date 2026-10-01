@@ -57,12 +57,9 @@
         var item = event.data.item;
         var cleanUrl = window.location.href.split('?')[0].split('#')[0];
         var hash = window.location.hash || '';
-        if (item && item !== 'root') {
-          var newUrl = cleanUrl + '?item=' + encodeURIComponent(item) + hash;
-          window.history.replaceState(null, '', newUrl);
-        } else {
-          window.history.replaceState(null, '', cleanUrl + hash);
-        }
+        var newUrl = cleanUrl + (item && item !== 'root' ? '?item=' + encodeURIComponent(item) : '') + hash;
+        console.log('[Depósito Wrapper] Navigation event received, updating URL to:', newUrl);
+        window.history.replaceState(null, '', newUrl);
       });
     })();
   </script>
