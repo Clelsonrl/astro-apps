@@ -35,12 +35,35 @@
   <script>
     (function () {
       var frame = document.getElementById('appFrame');
-      if (frame && window.location.search) {
+      if (frame) {
         var baseSrc = frame.getAttribute('src');
         var separator = baseSrc.indexOf('?') !== -1 ? '&' : '?';
-        var search = window.location.search.replace(/^\?/, '');
-        frame.src = baseSrc + separator + search;
+        var currentWrapperUrl = window.location.href.split('?')[0].split('#')[0];
+        var queryParams = ['wrapperUrl=' + encodeURIComponent(currentWrapperUrl)];
+
+        if (window.location.search) {
+          var search = window.location.search.replace(/^\?/, '');
+          if (search) {
+            queryParams.push(search);
+          }
+        }
+
+        frame.src = baseSrc + separator + queryParams.join('&');
       }
+
+      // Synchronize browser address bar with in-app navigation
+      window.addEventListener('message', function (event) {
+        if (!event || !event.data || event.data.type !== 'DEPOSITO_NAVIGATE') return;
+        var item = event.data.item;
+        var cleanUrl = window.location.href.split('?')[0].split('#')[0];
+        var hash = window.location.hash || '';
+        if (item && item !== 'root') {
+          var newUrl = cleanUrl + '?item=' + encodeURIComponent(item) + hash;
+          window.history.replaceState(null, '', newUrl);
+        } else {
+          window.history.replaceState(null, '', cleanUrl + hash);
+        }
+      });
     })();
   </script>
 </body>
