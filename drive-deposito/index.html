@@ -51,15 +51,62 @@
         frame.src = baseSrc + separator + queryParams.join('&');
       }
 
-      // Synchronize browser address bar with in-app navigation
-      window.addEventListener('message', function (event) {
-        if (!event || !event.data || event.data.type !== 'DEPOSITO_NAVIGATE') return;
-        var item = event.data.item;
+      var appPort = null;
+      var lastReportedItem = null;
+      var hasInitialStatePushed = false;
+
+      function handleNavFromApp(item) {
+        if (item === 'root') item = null;
+        if (item === lastReportedItem) return;
+        lastReportedItem = item;
+
         var cleanUrl = window.location.href.split('?')[0].split('#')[0];
         var hash = window.location.hash || '';
-        var newUrl = cleanUrl + (item && item !== 'root' ? '?item=' + encodeURIComponent(item) : '') + hash;
-        console.log('[Depósito Wrapper] Navigation event received, updating URL to:', newUrl);
-        window.history.replaceState(null, '', newUrl);
+        var newUrl = cleanUrl + (item ? '?item=' + encodeURIComponent(item) : '') + hash;
+
+        if (!hasInitialStatePushed) {
+          hasInitialStatePushed = true;
+          console.log('[Depósito Wrapper] Replacing initial state:', item, newUrl);
+          window.history.replaceState({ item: item }, '', newUrl);
+        } else {
+          console.log('[Depósito Wrapper] Pushing history state:', item, newUrl);
+          window.history.pushState({ item: item }, '', newUrl);
+        }
+      }
+
+      // Synchronize browser address bar with in-app navigation
+      window.addEventListener('message', function (event) {
+        if (!event || !event.data) return;
+
+        // MessageChannel handshake
+        if (event.data.type === 'DEPOSITO_CONNECT' && event.ports && event.ports[0]) {
+          appPort = event.ports[0];
+          appPort.onmessage = function (e) {
+            if (e.data && e.data.type === 'DEPOSITO_NAVIGATE') {
+              handleNavFromApp(e.data.item);
+            }
+          };
+          console.log('[Depósito Wrapper] Direct MessageChannel connected with app');
+          return;
+        }
+
+        // Direct postMessage fallback
+        if (event.data.type === 'DEPOSITO_NAVIGATE') {
+          handleNavFromApp(event.data.item);
+        }
+      });
+
+      // Browser Back/Forward navigation
+      window.addEventListener('popstate', function (event) {
+        var targetItem = (event.state && typeof event.state.item !== 'undefined')
+          ? event.state.item
+          : (new URLSearchParams(window.location.search).get('item') || null);
+        if (targetItem === 'root') targetItem = null;
+        lastReportedItem = targetItem;
+        console.log('[Depósito Wrapper] popstate detected, navigating app to:', targetItem);
+        if (appPort) {
+          appPort.postMessage({ type: 'NAVIGATE_TO', item: targetItem });
+        }
       });
     })();
   </script>
